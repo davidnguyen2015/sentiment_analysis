@@ -1,0 +1,98 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import pickle
+from tensorflow import keras
+from tensorflow.keras.preprocessing.text import Tokenizer
+from keras.utils import pad_sequences
+from keras.utils import to_categorical
+from keras.models import Sequential
+from keras.layers import Dense, SimpleRNN, Embedding
+
+from utility import read_data_train, read_data_test
+
+def process_data():
+    train_ds = pd.read_csv('sentiment_analysis/data/train.csv', encoding='ISO-8859-1')
+    validation_ds = pd.read_csv('sentiment_analysis/data/test.csv', encoding='ISO-8859-1')
+
+    train_ds = train_ds[['text','sentiment']]
+    validation_ds = validation_ds[['text','sentiment']]
+
+    train_ds.fillna({'text': ''}, inplace=True)
+    validation_ds.fillna({'text': ''}, inplace=True)
+
+    train_ds['sentiment'] = train_ds['sentiment'].apply(convert_int)
+    validation_ds['sentiment'] = validation_ds['sentiment'].apply(convert_int)
+
+    x_train = np.array(train_ds['text'].tolist())
+    y_train = np.array(train_ds['sentiment'].tolist())
+    x_test = np.array(validation_ds['text'].tolist())
+    y_test = np.array(validation_ds['sentiment'].tolist())
+
+    y_train = to_categorical(y_train, 3)
+    y_test = to_categorical(y_test, 3)
+
+    tokenizer = Tokenizer(num_words=20000)
+    tokenizer.fit_on_texts(x_train)
+    tokenizer.fit_on_texts(x_test)
+
+    x_train = tokenizer.texts_to_sequences(x_train)
+    x_test = tokenizer.texts_to_sequences(x_test)
+
+    # Set maxlen to 35
+    x_train = pad_sequences(x_train, padding='post', maxlen=35)
+    x_test = pad_sequences(x_test, padding='post', maxlen=35) 
+
+    model = Sequential()
+    model.add(Embedding(input_dim=20000, output_dim=5, input_length=35))
+    model.add(SimpleRNN(32,return_sequences=False))
+    model.add(Dense(3,activation='softmax'))
+    model.summary()
+
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    history = model.fit(x_train, y_train, epochs=10, validation_data=(x_test, y_test))
+
+    # saving
+    with open('sentiment_analysis/model/tokenizer.pickle', 'wb') as handle:
+        pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    model.save('sentiment_analysis/model/location.keras')
+    
+    plt.plot(history.history['accuracy'])
+    plt.plot(history.history['val_accuracy'])
+    plt.show()
+
+
+def convert_int(sentiment):
+    if sentiment =='positive':
+        return 0;
+    elif sentiment =='negative':
+        return 1;
+    else:
+        return 2;
+
+
+def predict_sentiment(input_text, tokenizer, model):
+    new_text_seq = tokenizer.texts_to_sequences([input_text])
+    # Use the max_len determined during training
+    new_text_padded = pad_sequences(new_text_seq, padding='post', maxlen=35)  
+    predictions = model.predict(new_text_padded)
+    predicted_class_index = predictions.argmax(axis=-1)
+    if predicted_class_index[0] == 0:
+        print("Postive Sentiment");
+    elif predicted_class_index[0] == 1:
+        print("Negative Sentiment")
+    else:
+        print("Neutral Sentiment")
+
+
+if __name__ == "__main__": 
+    # trainning
+    process_data()
+
+    # loading
+    with open('sentiment_analysis/model/tokenizer.pickle', 'rb') as handle:
+        tokenizer = pickle.load(handle)
+    model = keras.models.load_model('sentiment_analysis/model/location.keras')
+
+    input_text = "The movie was bad bad bad, i will not recommend this movie to anyone"
+    predict_sentiment(input_text, tokenizer, model)
